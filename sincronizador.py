@@ -102,10 +102,12 @@ except Exception as e:
 # FASE 2: DESCARGAR EXCELES CON SELENIUM (MODO FANTASMA)
 # ==========================================
 opciones = Options()
-# 🔥 NUEVO: Configuraciones obligatorias para servidores en la nube (GitHub Actions)
 opciones.add_argument('--headless=new')
 opciones.add_argument('--no-sandbox')
 opciones.add_argument('--disable-dev-shm-usage')
+# 🔥 SOLUCIÓN 1: Le damos un monitor gigante al robot para que nada se amontone
+opciones.add_argument('--window-size=1920,1080')
+
 prefs = {"download.default_directory": ruta_actual, "download.prompt_for_download": False}
 opciones.add_experimental_option("prefs", prefs)
 
@@ -136,21 +138,24 @@ try:
     driver.get('https://belatrizcolombia.com/app/public/login')
     time.sleep(3)
 
-    # 🔥 NUEVO: Leemos las claves desde la bóveda de seguridad de GitHub
     usuario = os.environ.get('BELATRIZ_USER')
     clave = os.environ.get('BELATRIZ_PASS')
 
     driver.find_element(By.ID, 'Documento').send_keys(usuario)
     driver.find_element(By.ID, 'password').send_keys(clave)
 
-    driver.find_element(By.ID, 'login-text').click()
+    # 🔥 SOLUCIÓN 2: Clic forzado inyectado con JS (Ignora si algo estorba en pantalla)
+    boton_login = driver.find_element(By.ID, 'login-text')
+    driver.execute_script("arguments[0].click();", boton_login)
     time.sleep(5)
 
     print("📥 Descargando catálogo de Oro Laminado 18K...")
     driver.get('https://belatrizcolombia.com/app/public/biblioteca')
     time.sleep(3)
-    driver.find_element(By.ID, 'btnExportar').click()
 
+    # Clic inyectado para el botón exportar oro
+    boton_exportar_oro = driver.find_element(By.ID, 'btnExportar')
+    driver.execute_script("arguments[0].click();", boton_exportar_oro)
     esperar_y_renombrar(archivo_oro)
 
     print("🔄 Cambiando a la línea Silver...")
@@ -162,8 +167,10 @@ try:
     print("📥 Descargando catálogo de Silver...")
     driver.get('https://belatrizcolombia.com/app/public/biblioteca')
     time.sleep(3)
-    driver.find_element(By.ID, 'btnExportar').click()
 
+    # Clic inyectado para el botón exportar plata
+    boton_exportar_plata = driver.find_element(By.ID, 'btnExportar')
+    driver.execute_script("arguments[0].click();", boton_exportar_plata)
     esperar_y_renombrar(archivo_plata)
 
 finally:
