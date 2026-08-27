@@ -270,56 +270,62 @@ except Exception as e:
 # ==========================================
 # FASE 5: GENERAR CATÁLOGO PARA META BUSINESS
 # ==========================================
-print("🛒 Generando feed estructurado para Meta Business...")
+print("🛒 Generando feed estructurado para Meta Business con Colecciones de WhatsApp...")
 df_meta = pd.DataFrame()
 
-# 1. Mapear las columnas exactas que exige la plantilla de Meta
 df_meta['id'] = df_final['id']
 df_meta['title'] = df_final['name'].astype(str).str[:200]
 df_meta['description'] = df_final['description'].astype(str).str[:9999]
 df_meta['availability'] = df_final['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
 df_meta['condition'] = 'new'
-
-# Meta requiere el formato de precio exacto: "55000.00 COP"
 df_meta['price'] = df_final['price'].apply(lambda x: f"{float(x):.2f} COP")
-# Generar el enlace directo a tu tienda
 df_meta['link'] = df_final['id'].apply(lambda x: f"https://diangel-catalogo.vercel.app/producto/{x}")
 
-# 2. Transformar enlaces de Drive a enlaces directos para que Meta no los rechace
 def convert_drive_link_meta(url):
     if not url or str(url).strip() == '': return ""
     first_url = str(url).split(';')[0].strip()
     if 'drive.google.com/file/d/' in first_url:
         file_id = first_url.split('/d/')[1].split('/')[0]
-        # Este formato inyecta la imagen cruda que Meta sí puede leer
         return f"https://drive.google.com/uc?export=view&id={file_id}"
     return first_url
 
 df_meta['image_link'] = df_final['images'].apply(convert_drive_link_meta)
-
-# 3. Categorías y otros datos vitales para Instagram/WhatsApp
 df_meta['brand'] = 'Diangel Joyería'
 df_meta['google_product_category'] = 'Apparel & Accessories > Jewelry'
 df_meta['inventory'] = df_final['stock']
-df_meta['item_group_id'] = df_final['base_code']  # Agrupa variantes (colores/tallas)
+df_meta['item_group_id'] = df_final['base_code']
 df_meta['color'] = df_final['color']
 df_meta['material'] = df_final['material']
 
-# 4. Filtrar: SOLO enviar los productos que SÍ tienen foto
+# 🔥 NUEVO CEREBRO: Clasificador automático para las colecciones de WhatsApp
+def clasificar_whatsapp(row):
+    cat = str(row['category']).strip().title()
+    nombre = str(row['name']).upper()
+
+    if cat == 'Cadenas' or cat == 'Cadena':
+        if '45' in nombre:
+            return 'Cadenas 45 cm'
+        elif '65' in nombre or '60' in nombre:
+            return 'Cadenas 65 cm'
+        else:
+            return 'Cadenas y Gargantillas'
+    return cat
+
+# Meta lee esta columna para armar las carpetas automáticamente
+df_meta['custom_label_0'] = df_final.apply(clasificar_whatsapp, axis=1)
+
 df_meta = df_meta[df_meta['image_link'] != '']
 print(f"📦 Total de productos con foto listos para Meta: {len(df_meta)}")
 
-# 5. Subir a una pestaña nueva en tu Google Sheets actual
 try:
     try:
         worksheet_meta = sh.worksheet('Meta_Feed')
     except gspread.exceptions.WorksheetNotFound:
-        # Si la pestaña no existe, el robot la crea automáticamente
         worksheet_meta = sh.add_worksheet(title="Meta_Feed", rows="1000", cols="20")
 
     worksheet_meta.clear()
     datos_meta = [df_meta.columns.values.tolist()] + df_meta.values.tolist()
     worksheet_meta.update(values=datos_meta, range_name='A1')
-    print("✅ Pestaña 'Meta_Feed' actualizada exitosamente.")
+    print("✅ Pestaña 'Meta_Feed' actualizada con las etiquetas de colección.")
 except Exception as e:
     print(f"❌ Error al subir catálogo a Meta_Feed: {e}")
