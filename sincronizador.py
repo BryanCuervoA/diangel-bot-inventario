@@ -253,6 +253,66 @@ df_final = df_final[df_final['stock'] > 0]
 df_final['id'] = range(1, len(df_final) + 1)
 
 # ==========================================
+# FASE 3.5: INYECTAR PRODUCTOS PERSONALIZADOS (MEJORADA)
+# ==========================================
+print("🔗 Inyectando catálogo de Personalizados...")
+try:
+    gc = gspread.service_account(filename='credenciales.json')
+    sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
+
+    worksheet_pers = sh.worksheet('Personalizados')
+    datos_pers = worksheet_pers.get_all_records()
+
+    if datos_pers:
+        df_pers = pd.DataFrame(datos_pers)
+
+        # 1. Emparejar columnas: si falta alguna, la creamos vacía
+        for col in df_final.columns:
+            if col not in df_pers.columns:
+                df_pers[col] = ''
+
+        # 2. Limpieza de precios (quitar puntos por si escribes 80.000)
+        df_pers['price'] = df_pers['price'].astype(str).str.replace('.', '', regex=False).str.replace(',', '', regex=False)
+        df_pers['price'] = pd.to_numeric(df_pers['price'], errors='coerce').fillna(0)
+
+        # 3. Status y descripción por defecto si los dejas vacíos
+        df_pers['status'] = df_pers['status'].apply(lambda x: 'Normal' if str(x).strip() == '' else x)
+        df_pers['description'] = df_pers['description'].apply(lambda x: 'Hermosa pieza exclusiva' if str(x).strip() == '' else x)
+
+        # 4. Manejo Inteligente de Imágenes
+        def asignar_imagen(row):
+            img_actual = str(row.get('images', '')).strip()
+            # Si pegaste el link a mano en el Excel, lo respetamos:
+            if img_actual:
+                return img_actual
+
+            # Si lo dejaste vacío, buscamos la carpeta en Drive:
+            codigo = str(row.get('code', ''))
+            base = str(row.get('base_code', ''))
+
+            if codigo in mapa_imagenes:
+                return mapa_imagenes[codigo]
+            if base in mapa_imagenes:
+                return mapa_imagenes[base]
+            return ''
+
+        df_pers['images'] = df_pers.apply(asignar_imagen, axis=1)
+
+        # 5. Filtrar solo los que tienen stock
+        df_pers['stock'] = pd.to_numeric(df_pers['stock'], errors='coerce').fillna(0)
+        df_pers = df_pers[df_pers['stock'] > 0]
+
+        # 6. Unir todo y renumerar IDs
+        df_final = pd.concat([df_final, df_pers], ignore_index=True)
+        df_final['id'] = range(1, len(df_final) + 1)
+
+        print(f"✅ ¡{len(df_pers)} productos personalizados agregados y adaptados con éxito!")
+
+except Exception as e:
+    print(f"⚠️ Omitiendo personalizados (Pestaña vacía o error): {e}")
+
+
+# ==========================================
 # FASE 4: SINCRONIZACIÓN CON LA NUBE
 # ==========================================
 print("☁️ Subiendo catálogo a Google Sheets...")
