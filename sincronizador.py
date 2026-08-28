@@ -257,8 +257,10 @@ df_final['id'] = range(1, len(df_final) + 1)
 # ==========================================
 print("🔗 Inyectando catálogo de Personalizados...")
 try:
-    # Asegúrate de usar la llave de tu archivo de Google Sheets
+    # 🔥 AQUÍ ESTABA EL ERROR: Faltaba esta línea para iniciar sesión en Google
+    gc = gspread.service_account(filename='credenciales.json')
     sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
+
     worksheet_pers = sh.worksheet('Personalizados')
     datos_pers = worksheet_pers.get_all_records()
 
@@ -270,11 +272,11 @@ try:
             if col not in df_pers.columns:
                 df_pers[col] = ''
 
-        # 2. El Super Cerebro de Precios (Evita el error de los 800 pesos)
+        # 2. El Super Cerebro de Precios
         def limpiar_precio(p):
             if pd.isna(p) or str(p).strip() == '': return 0
             if isinstance(p, (int, float)):
-                if 0 < p < 1000: return int(p * 1000) # Si Google Sheets lo lee como 80.0
+                if 0 < p < 1000: return int(p * 1000)
                 return int(p)
             p_str = str(p).replace('$', '').replace('COP', '').replace('.', '').replace(',', '').strip()
             try: return int(p_str)
