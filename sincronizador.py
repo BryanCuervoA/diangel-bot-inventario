@@ -253,7 +253,7 @@ df_final = df_final[df_final['stock'] > 0]
 df_final['id'] = range(1, len(df_final) + 1)
 
 # ==========================================
-# FASE 3.5: INYECTAR PRODUCTOS PERSONALIZADOS (MEJORADA)
+# FASE 3.5: INYECTAR PRODUCTOS PERSONALIZADOS (CORREGIDA)
 # ==========================================
 print("🔗 Inyectando catálogo de Personalizados...")
 try:
@@ -266,43 +266,53 @@ try:
     if datos_pers:
         df_pers = pd.DataFrame(datos_pers)
 
-        # 1. Emparejar columnas: si falta alguna, la creamos vacía
+        # 1. Emparejar columnas
         for col in df_final.columns:
             if col not in df_pers.columns:
                 df_pers[col] = ''
 
-        # 2. Limpieza de precios (quitar puntos por si escribes 80.000)
-        df_pers['price'] = df_pers['price'].astype(str).str.replace('.', '', regex=False).str.replace(',', '', regex=False)
-        df_pers['price'] = pd.to_numeric(df_pers['price'], errors='coerce').fillna(0)
+        # 2. 🧠 EL NUEVO CEREBRO PARA PRECIOS (Arregla el bug de los 800 pesos)
+        def limpiar_precio(p):
+            if pd.isna(p) or str(p).strip() == '': return 0
 
-        # 3. Status y descripción por defecto si los dejas vacíos
+            # Si Sheets lo leyó como número (ej. 80.0 o 80)
+            if isinstance(p, (int, float)):
+                if p < 1000 and p > 0: # Si Sheets interpretó 80.000 como 80.0
+                    return int(p * 1000)
+                return int(p)
+
+            # Si lo leyó como texto
+            p_str = str(p).replace('$', '').replace('COP', '').strip()
+            p_str = p_str.replace('.', '').replace(',', '')
+            try:
+                return int(p_str)
+            except:
+                return 0
+
+        df_pers['price'] = df_pers['price'].apply(limpiar_precio)
+
+        # 3. Textos por defecto
         df_pers['status'] = df_pers['status'].apply(lambda x: 'Normal' if str(x).strip() == '' else x)
         df_pers['description'] = df_pers['description'].apply(lambda x: 'Hermosa pieza exclusiva' if str(x).strip() == '' else x)
 
-        # 4. Manejo Inteligente de Imágenes
+        # 4. Enlaces de imágenes
         def asignar_imagen(row):
             img_actual = str(row.get('images', '')).strip()
-            # Si pegaste el link a mano en el Excel, lo respetamos:
-            if img_actual:
-                return img_actual
+            if img_actual: return img_actual
 
-            # Si lo dejaste vacío, buscamos la carpeta en Drive:
             codigo = str(row.get('code', ''))
             base = str(row.get('base_code', ''))
 
-            if codigo in mapa_imagenes:
-                return mapa_imagenes[codigo]
-            if base in mapa_imagenes:
-                return mapa_imagenes[base]
+            if codigo in mapa_imagenes: return mapa_imagenes[codigo]
+            if base in mapa_imagenes: return mapa_imagenes[base]
             return ''
 
         df_pers['images'] = df_pers.apply(asignar_imagen, axis=1)
 
-        # 5. Filtrar solo los que tienen stock
+        # 5. Filtrar stock y unir al catálogo principal
         df_pers['stock'] = pd.to_numeric(df_pers['stock'], errors='coerce').fillna(0)
         df_pers = df_pers[df_pers['stock'] > 0]
 
-        # 6. Unir todo y renumerar IDs
         df_final = pd.concat([df_final, df_pers], ignore_index=True)
         df_final['id'] = range(1, len(df_final) + 1)
 
@@ -310,7 +320,6 @@ try:
 
 except Exception as e:
     print(f"⚠️ Omitiendo personalizados (Pestaña vacía o error): {e}")
-
 
 # ==========================================
 # FASE 4: SINCRONIZACIÓN CON LA NUBE
