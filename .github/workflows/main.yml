@@ -2,8 +2,8 @@ name: Sincronizador Diario Diangel
 
 on:
   schedule:
-    # 05:00 UTC es exactamente las 00:00 a.m. en Colombia
-    - cron: '0 5 * * *'
+    # 03:17 UTC equivale a las 10:17 p.m. en Colombia
+    - cron: '17 3 * * *'
   workflow_dispatch: # Esto agrega un botón para que puedas correrlo manualmente cuando quieras
 
 jobs:

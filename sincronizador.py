@@ -327,7 +327,7 @@ except Exception as e:
     print(f"❌ Error al subir a Hoja 1: {e}")
 
 # ==========================================
-# FASE 5: GENERAR CATÁLOGO PARA META Y WHATSAPP
+# FASE 5: GENERAR CATÁLOGO PARA META Y WHATSAPP (MÚLTIPLES FOTOS)
 # ==========================================
 print("🛒 Generando feed estructurado para Meta Business...")
 df_meta = pd.DataFrame()
@@ -337,19 +337,39 @@ df_meta['title'] = df_final['name'].astype(str).str[:200]
 df_meta['description'] = df_final['description'].astype(str).str[:9999]
 df_meta['availability'] = df_final['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
 df_meta['condition'] = 'new'
-# Aquí Meta exige los dos ceros al final, por eso aplicamos ".00 COP"
 df_meta['price'] = df_final['price'].apply(lambda x: f"{float(x):.2f} COP")
 df_meta['link'] = df_final['id'].apply(lambda x: f"https://diangel-catalogo.vercel.app/producto/{x}")
 
-def convert_drive_link_meta(url):
-    if not url or str(url).strip() == '': return ""
-    first_url = str(url).split(';')[0].strip()
+# 🧠 NUEVO TRADUCTOR DE FOTOS PARA META
+def extraer_foto_principal(url_string):
+    if not url_string or str(url_string).strip() == '': return ""
+    urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
+    if not urls: return ""
+    first_url = urls[0]
     if 'drive.google.com/file/d/' in first_url:
         file_id = first_url.split('/d/')[1].split('/')[0]
         return f"https://drive.google.com/uc?export=view&id={file_id}"
     return first_url
 
-df_meta['image_link'] = df_final['images'].apply(convert_drive_link_meta)
+def extraer_fotos_adicionales(url_string):
+    if not url_string or str(url_string).strip() == '': return ""
+    urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
+    if len(urls) <= 1: return ""
+
+    fotos_extra = []
+    for u in urls[1:]: # Toma desde la segunda foto en adelante
+        if 'drive.google.com/file/d/' in u:
+            file_id = u.split('/d/')[1].split('/')[0]
+            fotos_extra.append(f"https://drive.google.com/uc?export=view&id={file_id}")
+        else:
+            fotos_extra.append(u)
+    # Meta exige separar las fotos adicionales con coma (,)
+    return ",".join(fotos_extra)
+
+# Aplicamos las reglas de fotos
+df_meta['image_link'] = df_final['images'].apply(extraer_foto_principal)
+df_meta['additional_image_link'] = df_final['images'].apply(extraer_fotos_adicionales)
+
 df_meta['brand'] = 'Diangel Joyería'
 df_meta['google_product_category'] = 'Apparel & Accessories > Jewelry'
 df_meta['inventory'] = df_final['stock']
@@ -382,6 +402,6 @@ try:
     worksheet_meta.clear()
     datos_meta = [df_meta.columns.values.tolist()] + df_meta.fillna('').values.tolist()
     worksheet_meta.update(values=datos_meta, range_name='A1')
-    print("✅ Pestaña 'Meta_Feed' actualizada con éxito. ¡Lista para Facebook y WhatsApp!")
+    print("✅ Pestaña 'Meta_Feed' actualizada con éxito. ¡Fotos adicionales incluidas!")
 except Exception as e:
     print(f"❌ Error al subir catálogo a Meta_Feed: {e}")
