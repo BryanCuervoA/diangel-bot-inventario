@@ -33,68 +33,31 @@ for archivo in archivos_viejos:
         pass
 
 # ==========================================
-# FUNCIÓN SECUNDARIA: MAPEAR FOTOS DE DRIVE
+# FUNCIÓN SECUNDARIA: MAPEAR FOTOS DE CLOUDINARY
 # ==========================================
-def mapear_fotos_de_drive():
-    print("🔍 Escaneando carpetas de fotos en Google Drive...")
-    scope = ['https://www.googleapis.com/auth/drive.readonly']
-    creds = Credentials.from_service_account_file('credenciales.json', scopes=scope)
-    service = build('drive', 'v3', credentials=creds)
+def mapear_fotos_cloudinary():
+    print("⚡ Leyendo base de datos ultrarrápida de Cloudinary...")
+    gc = gspread.service_account(filename='credenciales.json')
+    sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
 
-    carpetas = []
-    page_token = None
+    try:
+        ws_fotos = sh.worksheet('Base_Fotos_Cloudinary')
+        registros = ws_fotos.get_all_records()
 
-    while True:
-        query_carpetas = f"'{ID_CARPETA_PADRE_FOTOS}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        resultados = service.files().list(
-            q=query_carpetas,
-            fields="nextPageToken, files(id, name)",
-            pageSize=1000,
-            pageToken=page_token
-        ).execute()
+        diccionario_fotos = {}
+        for row in registros:
+            if 'codigo' in row and 'enlaces_cloudinary' in row:
+                diccionario_fotos[str(row['codigo']).strip()] = str(row['enlaces_cloudinary']).strip()
 
-        carpetas.extend(resultados.get('files', []))
-        page_token = resultados.get('nextPageToken')
-        if not page_token:
-            break
-
-    diccionario_fotos = {}
-
-    for carp in carpetas:
-        id_carpeta = carp['id']
-        codigo_referencia = str(carp['name']).strip()
-
-        query_fotos = f"'{id_carpeta}' in parents and mimeType contains 'image/' and trashed = false"
-        resultados_fotos = service.files().list(
-            q=query_fotos,
-            fields="files(id, name)",
-            pageSize=1000
-        ).execute()
-
-        fotos = resultados_fotos.get('files', [])
-
-        foto_perfil = []
-        otras_fotos = []
-
-        for foto in fotos:
-            enlace = f"https://drive.google.com/file/d/{foto['id']}/view"
-            nombre_archivo = str(foto.get('name', '')).upper()
-
-            if 'PERFIL' in nombre_archivo:
-                foto_perfil.append(enlace)
-            else:
-                otras_fotos.append(enlace)
-
-        enlaces_ordenados = foto_perfil + otras_fotos
-
-        if enlaces_ordenados:
-            diccionario_fotos[codigo_referencia] = ";".join(enlaces_ordenados)
-
-    return diccionario_fotos
+        return diccionario_fotos
+    except Exception as e:
+        print(f"⚠️ Error leyendo la pestaña Base_Fotos_Cloudinary: {e}")
+        return {}
 
 mapa_imagenes = {}
 try:
-    mapa_imagenes = mapear_fotos_de_drive()
+    mapa_imagenes = mapear_fotos_cloudinary()
+    print(f"✅ Se cargaron {len(mapa_imagenes)} galerías de fotos desde Cloudinary.")
 except Exception as e:
     print(f"⚠️ No se pudieron cargar las fotos: {e}")
 
@@ -340,31 +303,18 @@ df_meta['condition'] = 'new'
 df_meta['price'] = df_final['price'].apply(lambda x: f"{float(x):.2f} COP")
 df_meta['link'] = df_final['id'].apply(lambda x: f"https://diangel-catalogo.vercel.app/producto/{x}")
 
-# 🧠 NUEVO TRADUCTOR DE FOTOS PARA META
+# 🧠 TRADUCTOR DE FOTOS CLOUDINARY PARA META
 def extraer_foto_principal(url_string):
     if not url_string or str(url_string).strip() == '': return ""
     urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
     if not urls: return ""
-    first_url = urls[0]
-    if 'drive.google.com/file/d/' in first_url:
-        file_id = first_url.split('/d/')[1].split('/')[0]
-        return f"https://drive.google.com/uc?export=view&id={file_id}"
-    return first_url
+    return urls[0]
 
 def extraer_fotos_adicionales(url_string):
     if not url_string or str(url_string).strip() == '': return ""
     urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
     if len(urls) <= 1: return ""
-
-    fotos_extra = []
-    for u in urls[1:]: # Toma desde la segunda foto en adelante
-        if 'drive.google.com/file/d/' in u:
-            file_id = u.split('/d/')[1].split('/')[0]
-            fotos_extra.append(f"https://drive.google.com/uc?export=view&id={file_id}")
-        else:
-            fotos_extra.append(u)
-    # Meta exige separar las fotos adicionales con coma (,)
-    return ",".join(fotos_extra)
+    return ",".join(urls[1:])
 
 # Aplicamos las reglas de fotos
 df_meta['image_link'] = df_final['images'].apply(extraer_foto_principal)
