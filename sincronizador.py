@@ -162,9 +162,11 @@ def limpiar_y_combinar_nombre(row):
         'GARGANTILLA': ('Gargantillas', 'Gargantilla'), 'OTROS': ('Otros', 'Otros')
     }
     cat_plural, cat_singular = cat_map.get(cat_original, (cat_original.title(), cat_original.title()))
-    if not nombre_original: return cat_singular
+    if not nombre_original:
+        return cat_singular
     palabras = nombre_original.split()
-    if not palabras: return cat_singular
+    if not palabras:
+        return cat_singular
     primer_elemento = palabras[0]
     if len(primer_elemento) == 1 and primer_elemento.isalpha():
         nombre_limpio = " ".join(palabras[1:])
@@ -175,7 +177,8 @@ def limpiar_y_combinar_nombre(row):
     return f"{cat_singular} {nombre_limpio}".strip()
 
 def extraer_variantes(referencia):
-    if '-' not in referencia: return referencia, ''
+    if '-' not in referencia:
+        return referencia, ''
     partes = referencia.split('-')
     if len(partes) >= 2 and partes[0].isalpha() and len(partes[0]) <= 2:
         codigo_base = f"{partes[0]}-{partes[1]}".strip()
@@ -185,9 +188,12 @@ def extraer_variantes(referencia):
         indice_variante = 1
 
     variante = partes[indice_variante].strip().upper() if len(partes) > indice_variante else ''
-    if not variante: return codigo_base, ''
-    if len(variante) == 1: return referencia, ''
-    if variante.startswith('T') and variante[1:].replace('.', '').isdigit(): return referencia, ''
+    if not variante:
+        return codigo_base, ''
+    if len(variante) == 1:
+        return referencia, ''
+    if variante.startswith('T') and variante[1:].replace('.', '').isdigit():
+        return referencia, ''
     return codigo_base, variante
 
 df_final = pd.DataFrame()
@@ -196,7 +202,6 @@ df_final['id'] = df_proveedor.index + 1
 referencias_limpias = df_proveedor['REFERENCIA'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 bases_y_colores = referencias_limpias.apply(extraer_variantes)
 
-# (Dentro de sincronizador.py - Línea ~157)
 df_final['code'] = referencias_limpias
 df_final['base_code'] = [x[0] for x in bases_y_colores]
 df_final['name'] = df_proveedor.apply(limpiar_y_combinar_nombre, axis=1)
@@ -204,12 +209,10 @@ df_final['collection'] = ''
 df_final['category'] = df_proveedor['CATEGORIA'].str.strip().str.title()
 df_final['material'] = df_proveedor['LINEA PRODUCTO']
 df_final['color'] = [x[1] for x in bases_y_colores]
-
-# EL PRECIO DETAL SUMA 10.000
 df_final['price'] = df_proveedor['PRECIO DETAL'] + 10000
 df_final['previousPrice'] = ''
 
-# AGREGAMOS EL PRECIO MAYORISTA (Precio Emprendedor original sin sumarle nada)
+# AGREGAMOS EL PRECIO MAYORISTA
 df_final['precioMayorista'] = df_proveedor['PRECIO EMPRENDEDOR']
 
 df_final['stock'] = df_proveedor['ESTATUS'].apply(lambda x: 10 if str(x).strip().lower() == 'activo' else 0)
@@ -219,7 +222,7 @@ df_final['description'] = 'Hermosa pieza de ' + df_final['material']
 df_final['tags'] = ''
 
 df_final = df_final.fillna('')
-df_final = df_final[df_final['stock'] > 0]
+# IMPORTANTE: Eliminamos el filtro de "stock > 0" aquí para que "df_final" mantenga el historial completo
 df_final['id'] = range(1, len(df_final) + 1)
 
 # ==========================================
@@ -227,7 +230,6 @@ df_final['id'] = range(1, len(df_final) + 1)
 # ==========================================
 print("🔗 Inyectando catálogo de Personalizados...")
 try:
-    # 🔥 AQUÍ ESTABA EL ERROR: Faltaba esta línea para iniciar sesión en Google
     gc = gspread.service_account(filename='credenciales.json')
     sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
 
@@ -244,13 +246,17 @@ try:
 
         # 2. El Super Cerebro de Precios
         def limpiar_precio(p):
-            if pd.isna(p) or str(p).strip() == '': return 0
+            if pd.isna(p) or str(p).strip() == '':
+                return 0
             if isinstance(p, (int, float)):
-                if 0 < p < 1000: return int(p * 1000)
+                if 0 < p < 1000:
+                    return int(p * 1000)
                 return int(p)
             p_str = str(p).replace('$', '').replace('COP', '').replace('.', '').replace(',', '').strip()
-            try: return int(p_str)
-            except: return 0
+            try:
+                return int(p_str)
+            except:
+                return 0
 
         df_pers['price'] = df_pers['price'].apply(limpiar_precio)
 
@@ -267,20 +273,22 @@ try:
         # 4. Enlaces de imágenes (respeta tu link manual o busca en Drive)
         def asignar_imagen(row):
             img_actual = str(row.get('images', '')).strip()
-            if img_actual: return img_actual
+            if img_actual:
+                return img_actual
             codigo = str(row.get('code', ''))
             base = str(row.get('base_code', ''))
-            if codigo in mapa_imagenes: return mapa_imagenes[codigo]
-            if base in mapa_imagenes: return mapa_imagenes[base]
+            if codigo in mapa_imagenes:
+                return mapa_imagenes[codigo]
+            if base in mapa_imagenes:
+                return mapa_imagenes[base]
             return ''
 
         df_pers['images'] = df_pers.apply(asignar_imagen, axis=1)
 
-        # 5. Filtrar los que tienen stock
+        # 5. Formatear stock
         df_pers['stock'] = pd.to_numeric(df_pers['stock'], errors='coerce').fillna(0)
-        df_pers = df_pers[df_pers['stock'] > 0]
 
-        # 6. Unir al catálogo de Belatriz y renumerar IDs ordenadamente
+        # 6. Unir al catálogo maestro (Con stock e inactivos)
         df_final = pd.concat([df_final, df_pers], ignore_index=True)
         df_final['id'] = range(1, len(df_final) + 1)
 
@@ -289,14 +297,33 @@ except Exception as e:
     print(f"⚠️ Omitiendo personalizados (Pestaña vacía o error): {e}")
 
 # ==========================================
-# FASE 4: SUBIR A HOJA 1 (PÁGINA WEB)
+# FASE 3.8: CREAR HOJA MAESTRA PARA FACTURACIÓN
 # ==========================================
-print("⬆️ Subiendo catálogo unificado a Hoja 1...")
+print("🗄️ Guardando Inventario Completo (Activos + Agotados)...")
+try:
+    try:
+        ws_completo = sh.worksheet('Inventario_Completo')
+    except:
+        ws_completo = sh.add_worksheet(title="Inventario_Completo", rows="5000", cols="20")
+
+    ws_completo.clear()
+    datos_completo = [df_final.columns.values.tolist()] + df_final.fillna('').values.tolist()
+    ws_completo.update(values=datos_completo, range_name='A1')
+    print("✅ 'Inventario_Completo' guardado con éxito. ¡Listo para facturar!")
+except Exception as e:
+    print(f"❌ Error al subir Inventario Completo: {e}")
+
+# ==========================================
+# FASE 4: FILTRAR Y SUBIR SOLO ACTIVOS A HOJA 1
+# ==========================================
+df_activos = df_final[df_final['stock'] > 0].copy()
+
+print("⬆️ Subiendo catálogo filtrado a Hoja 1 (Página web)...")
 try:
     worksheet_hoja1 = sh.worksheet('Hoja 1')
     worksheet_hoja1.clear()
     # fillna('') es vital para que Google Sheets no arroje error con celdas vacías
-    datos_hoja1 = [df_final.columns.values.tolist()] + df_final.fillna('').values.tolist()
+    datos_hoja1 = [df_activos.columns.values.tolist()] + df_activos.fillna('').values.tolist()
     worksheet_hoja1.update(values=datos_hoja1, range_name='A1')
     print("✅ 'Hoja 1' actualizada con éxito. ¡Lista para la página web!")
 except Exception as e:
@@ -308,49 +335,57 @@ except Exception as e:
 print("🛒 Generando feed estructurado para Meta Business...")
 df_meta = pd.DataFrame()
 
-df_meta['id'] = df_final['id']
-df_meta['title'] = df_final['name'].astype(str).str[:200]
-df_meta['description'] = df_final['description'].astype(str).str[:9999]
-df_meta['availability'] = df_final['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
+# AHORA USAMOS EXCLUSIVAMENTE 'df_activos' PARA QUE NO SALGAN AGOTADOS EN META
+df_meta['id'] = df_activos['id']
+df_meta['title'] = df_activos['name'].astype(str).str[:200]
+df_meta['description'] = df_activos['description'].astype(str).str[:9999]
+df_meta['availability'] = df_activos['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
 df_meta['condition'] = 'new'
-df_meta['price'] = df_final['price'].apply(lambda x: f"{float(x):.2f} COP")
-df_meta['link'] = df_final['id'].apply(lambda x: f"https://diangel-catalogo.vercel.app/producto/{x}")
+df_meta['price'] = df_activos['price'].apply(lambda x: f"{float(x):.2f} COP")
+df_meta['link'] = df_activos['id'].apply(lambda x: f"https://diangel-catalogo.vercel.app/producto/{x}")
 
 # 🧠 TRADUCTOR DE FOTOS CLOUDINARY PARA META
 def extraer_foto_principal(url_string):
-    if not url_string or str(url_string).strip() == '': return ""
+    if not url_string or str(url_string).strip() == '':
+        return ""
     urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
-    if not urls: return ""
+    if not urls:
+        return ""
     return urls[0]
 
 def extraer_fotos_adicionales(url_string):
-    if not url_string or str(url_string).strip() == '': return ""
+    if not url_string or str(url_string).strip() == '':
+        return ""
     urls = [u.strip() for u in str(url_string).split(';') if u.strip()]
-    if len(urls) <= 1: return ""
+    if len(urls) <= 1:
+        return ""
     return ",".join(urls[1:])
 
 # Aplicamos las reglas de fotos
-df_meta['image_link'] = df_final['images'].apply(extraer_foto_principal)
-df_meta['additional_image_link'] = df_final['images'].apply(extraer_fotos_adicionales)
+df_meta['image_link'] = df_activos['images'].apply(extraer_foto_principal)
+df_meta['additional_image_link'] = df_activos['images'].apply(extraer_fotos_adicionales)
 
 df_meta['brand'] = 'Diangel Joyería'
 df_meta['google_product_category'] = 'Apparel & Accessories > Jewelry'
-df_meta['inventory'] = df_final['stock']
-df_meta['item_group_id'] = df_final['base_code']
-df_meta['color'] = df_final['color']
-df_meta['material'] = df_final['material']
+df_meta['inventory'] = df_activos['stock']
+df_meta['item_group_id'] = df_activos['base_code']
+df_meta['color'] = df_activos['color']
+df_meta['material'] = df_activos['material']
 
 # Cerebro clasificador de WhatsApp
 def clasificar_whatsapp(row):
     cat = str(row['category']).strip().title()
     nombre = str(row['name']).upper()
     if cat == 'Cadenas' or cat == 'Cadena':
-        if '45' in nombre: return 'Cadenas 45 cm'
-        elif '65' in nombre or '60' in nombre: return 'Cadenas 65 cm'
-        else: return 'Cadenas y Gargantillas'
+        if '45' in nombre:
+            return 'Cadenas 45 cm'
+        elif '65' in nombre or '60' in nombre:
+            return 'Cadenas 65 cm'
+        else:
+            return 'Cadenas y Gargantillas'
     return cat
 
-df_meta['custom_label_0'] = df_final.apply(clasificar_whatsapp, axis=1)
+df_meta['custom_label_0'] = df_activos.apply(clasificar_whatsapp, axis=1)
 
 # Filtramos los que tengan imagen válida
 df_meta = df_meta[df_meta['image_link'] != '']
