@@ -70,12 +70,25 @@ for carp in carpetas:
 
     print(f"☁️ Migrando fotos de: {codigo_referencia}...")
     id_carpeta = carp['id']
+    # 🔍 OBTENER Y ORDENAR FOTOS (PERFIL PRIMERO)
     query_fotos = f"'{id_carpeta}' in parents and mimeType contains 'image/' and trashed = false"
     fotos = drive_service.files().list(q=query_fotos, fields="files(id, name)").execute().get('files', [])
 
-    enlaces_optimizados = []
+    foto_perfil = []
+    otras_fotos = []
 
     for foto in fotos:
+        nombre_archivo = str(foto.get('name', '')).upper()
+        if 'PERFIL' in nombre_archivo:
+            foto_perfil.append(foto)
+        else:
+            otras_fotos.append(foto)
+
+    # Fusionamos asegurando que PERFIL quede de primeras
+    fotos_ordenadas = foto_perfil + otras_fotos
+    enlaces_optimizados = []
+
+    for foto in fotos_ordenadas:
         # Descargar foto de Drive a la memoria del computador
         request = drive_service.files().get_media(fileId=foto['id'])
         fh = io.BytesIO()

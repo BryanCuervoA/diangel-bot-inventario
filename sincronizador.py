@@ -196,6 +196,7 @@ df_final['id'] = df_proveedor.index + 1
 referencias_limpias = df_proveedor['REFERENCIA'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
 bases_y_colores = referencias_limpias.apply(extraer_variantes)
 
+# (Dentro de sincronizador.py - Línea ~157)
 df_final['code'] = referencias_limpias
 df_final['base_code'] = [x[0] for x in bases_y_colores]
 df_final['name'] = df_proveedor.apply(limpiar_y_combinar_nombre, axis=1)
@@ -203,8 +204,14 @@ df_final['collection'] = ''
 df_final['category'] = df_proveedor['CATEGORIA'].str.strip().str.title()
 df_final['material'] = df_proveedor['LINEA PRODUCTO']
 df_final['color'] = [x[1] for x in bases_y_colores]
+
+# EL PRECIO DETAL SUMA 10.000
 df_final['price'] = df_proveedor['PRECIO DETAL'] + 10000
 df_final['previousPrice'] = ''
+
+# AGREGAMOS EL PRECIO MAYORISTA (Precio Emprendedor original sin sumarle nada)
+df_final['precioMayorista'] = df_proveedor['PRECIO EMPRENDEDOR']
+
 df_final['stock'] = df_proveedor['ESTATUS'].apply(lambda x: 10 if str(x).strip().lower() == 'activo' else 0)
 df_final['status'] = df_final['stock'].apply(lambda x: 'Normal' if x > 0 else 'Agotado')
 df_final['images'] = df_final['code'].map(mapa_imagenes).fillna(df_final['base_code'].map(mapa_imagenes)).fillna('')
@@ -246,6 +253,12 @@ try:
             except: return 0
 
         df_pers['price'] = df_pers['price'].apply(limpiar_precio)
+
+        # Aseguramos la columna en personalizados
+        if 'precioMayorista' not in df_pers.columns:
+            df_pers['precioMayorista'] = df_pers['price'] # Si no lo configuras manual, usa el mismo precio
+        else:
+            df_pers['precioMayorista'] = df_pers['precioMayorista'].apply(limpiar_precio)
 
         # 3. Rellenar vacíos por si acaso
         df_pers['status'] = df_pers['status'].apply(lambda x: 'Normal' if str(x).strip() == '' else x)
