@@ -342,7 +342,7 @@ df_meta['description'] = df_activos['description'].astype(str).str[:9999]
 df_meta['availability'] = df_activos['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
 df_meta['condition'] = 'new'
 df_meta['price'] = df_activos['price'].apply(lambda x: f"{float(x):.2f} COP")
-df_meta['link'] = df_activos['id'].apply(lambda x: f"https://www.diangeljoyeria.com/producto/{x}")
+df_meta['link'] = df_activos['code'].apply(lambda x: f"https://www.diangeljoyeria.com/producto/{x}")
 
 # 🧠 TRADUCTOR DE FOTOS CLOUDINARY PARA META
 def extraer_foto_principal(url_string):
