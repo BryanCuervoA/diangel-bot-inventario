@@ -2,6 +2,8 @@
 import time
 import os
 import glob
+import json
+import urllib.request
 import pandas as pd
 import gspread
 from selenium import webdriver
@@ -62,13 +64,12 @@ except Exception as e:
     print(f"⚠️ No se pudieron cargar las fotos: {e}")
 
 # ==========================================
-# FASE 2: DESCARGAR EXCELES CON SELENIUM (MODO FANTASMA)
+# FASE 2: DESCARGAR EXCELES CON SELENIUM
 # ==========================================
 opciones = Options()
 opciones.add_argument('--headless=new')
 opciones.add_argument('--no-sandbox')
 opciones.add_argument('--disable-dev-shm-usage')
-# 🔥 SOLUCIÓN 1: Le damos un monitor gigante al robot para que nada se amontone
 opciones.add_argument('--window-size=1920,1080')
 
 prefs = {"download.default_directory": ruta_actual, "download.prompt_for_download": False}
@@ -107,7 +108,6 @@ try:
     driver.find_element(By.ID, 'Documento').send_keys(usuario)
     driver.find_element(By.ID, 'password').send_keys(clave)
 
-    # 🔥 SOLUCIÓN 2: Clic forzado inyectado con JS (Ignora si algo estorba en pantalla)
     boton_login = driver.find_element(By.ID, 'login-text')
     driver.execute_script("arguments[0].click();", boton_login)
     time.sleep(5)
@@ -116,7 +116,6 @@ try:
     driver.get('https://belatrizcolombia.com/app/public/biblioteca')
     time.sleep(3)
 
-    # Clic inyectado para el botón exportar oro
     boton_exportar_oro = driver.find_element(By.ID, 'btnExportar')
     driver.execute_script("arguments[0].click();", boton_exportar_oro)
     esperar_y_renombrar(archivo_oro)
@@ -131,7 +130,6 @@ try:
     driver.get('https://belatrizcolombia.com/app/public/biblioteca')
     time.sleep(3)
 
-    # Clic inyectado para el botón exportar plata
     boton_exportar_plata = driver.find_element(By.ID, 'btnExportar')
     driver.execute_script("arguments[0].click();", boton_exportar_plata)
     esperar_y_renombrar(archivo_plata)
@@ -151,8 +149,8 @@ df_proveedor = pd.concat([df_oro, df_plata], ignore_index=True)
 df_proveedor.columns = df_proveedor.columns.str.strip()
 
 def limpiar_y_combinar_nombre(row):
-    cat_original = str(row['CATEGORIA']).strip().upper()
-    nombre_original = str(row['NOMBRE']).strip()
+    cat_original = str(row.get('CATEGORIA', '')).strip().upper()
+    nombre_original = str(row.get('NOMBRE', '')).strip()
     cat_map = {
         'ARETES': ('Aretes', 'Arete'), 'DIJES': ('Dijes', 'Dije'),
         'CADENAS': ('Cadenas', 'Cadena'), 'PULSERAS': ('Pulseras', 'Pulsera'),
@@ -162,7 +160,7 @@ def limpiar_y_combinar_nombre(row):
         'GARGANTILLA': ('Gargantillas', 'Gargantilla'), 'OTROS': ('Otros', 'Otros')
     }
     cat_plural, cat_singular = cat_map.get(cat_original, (cat_original.title(), cat_original.title()))
-    if not nombre_original:
+    if not nombre_original or nombre_original.lower() == 'nan':
         return cat_singular
     palabras = nombre_original.split()
     if not palabras:
@@ -196,6 +194,20 @@ def extraer_variantes(referencia):
         return referencia, ''
     return codigo_base, variante
 
+# Función blindada para convertir cualquier precio a entero sin fallar con celdas vacías
+def limpiar_precio_seguro(p):
+    if pd.isna(p) or str(p).strip() == '':
+        return 0
+    if isinstance(p, (int, float)):
+        if 0 < p < 1000:
+            return int(p * 1000)
+        return int(p)
+    p_str = str(p).replace('$', '').replace('COP', '').replace('.', '').replace(',', '').strip()
+    try:
+        return int(float(p_str))
+    except:
+        return 0
+
 df_final = pd.DataFrame()
 df_final['id'] = df_proveedor.index + 1
 
@@ -206,71 +218,56 @@ df_final['code'] = referencias_limpias
 df_final['base_code'] = [x[0] for x in bases_y_colores]
 df_final['name'] = df_proveedor.apply(limpiar_y_combinar_nombre, axis=1)
 df_final['collection'] = ''
-df_final['category'] = df_proveedor['CATEGORIA'].str.strip().str.title()
-df_final['material'] = df_proveedor['LINEA PRODUCTO']
+df_final['category'] = df_proveedor['CATEGORIA'].astype(str).str.strip().str.title()
+df_final['material'] = df_proveedor['LINEA PRODUCTO'].fillna('Oro Laminado 18K')
 df_final['color'] = [x[1] for x in bases_y_colores]
-df_final['price'] = df_proveedor['PRECIO DETAL'] + 10000
+
+# 🔥 CORRECCIÓN CRÍTICA: Si PRECIO DETAL viene vacío en Belatriz, queda en 0 (no en '')
+precios_detal_base = df_proveedor['PRECIO DETAL'].apply(limpiar_precio_seguro)
+df_final['price'] = precios_detal_base.apply(lambda x: x + 10000 if x > 0 else 0)
 df_final['previousPrice'] = ''
 
-# AGREGAMOS EL PRECIO MAYORISTA
-df_final['precioMayorista'] = df_proveedor['PRECIO EMPRENDEDOR']
+precios_emp_base = df_proveedor['PRECIO EMPRENDEDOR'].apply(limpiar_precio_seguro)
+df_final['precioMayorista'] = precios_emp_base
 
 df_final['stock'] = df_proveedor['ESTATUS'].apply(lambda x: 10 if str(x).strip().lower() == 'activo' else 0)
 df_final['status'] = df_final['stock'].apply(lambda x: 'Normal' if x > 0 else 'Agotado')
 df_final['images'] = df_final['code'].map(mapa_imagenes).fillna(df_final['base_code'].map(mapa_imagenes)).fillna('')
-df_final['description'] = 'Hermosa pieza de ' + df_final['material']
+df_final['description'] = 'Hermosa pieza de ' + df_final['material'].astype(str)
 df_final['tags'] = ''
 
+# Limpiamos filas inválidas sin código
+df_final = df_final[df_final['code'] != ''].copy()
+df_final = df_final[df_final['code'].str.lower() != 'nan'].copy()
 df_final = df_final.fillna('')
-# IMPORTANTE: Eliminamos el filtro de "stock > 0" aquí para que "df_final" mantenga el historial completo
 df_final['id'] = range(1, len(df_final) + 1)
 
 # ==========================================
-# FASE 3.5: INYECTAR PRODUCTOS PERSONALIZADOS
+# FASE 3.5: INYECTAR PRODUCTOS PERSONALIZADOS (SHEETS + ERP)
 # ==========================================
 print("🔗 Inyectando catálogo de Personalizados...")
-try:
-    gc = gspread.service_account(filename='credenciales.json')
-    sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
+gc = gspread.service_account(filename='credenciales.json')
+sh = gc.open_by_key('1jRTJqwPir1CSGQzKazjgWNo3TWr3b8Nz-RkWHOfatxo')
 
+try:
     worksheet_pers = sh.worksheet('Personalizados')
     datos_pers = worksheet_pers.get_all_records()
 
     if datos_pers:
         df_pers = pd.DataFrame(datos_pers)
-
-        # 1. Emparejar columnas exactamente
         for col in df_final.columns:
             if col not in df_pers.columns:
                 df_pers[col] = ''
 
-        # 2. El Super Cerebro de Precios
-        def limpiar_precio(p):
-            if pd.isna(p) or str(p).strip() == '':
-                return 0
-            if isinstance(p, (int, float)):
-                if 0 < p < 1000:
-                    return int(p * 1000)
-                return int(p)
-            p_str = str(p).replace('$', '').replace('COP', '').replace('.', '').replace(',', '').strip()
-            try:
-                return int(p_str)
-            except:
-                return 0
-
-        df_pers['price'] = df_pers['price'].apply(limpiar_precio)
-
-        # Aseguramos la columna en personalizados
+        df_pers['price'] = df_pers['price'].apply(limpiar_precio_seguro)
         if 'precioMayorista' not in df_pers.columns:
-            df_pers['precioMayorista'] = df_pers['price'] # Si no lo configuras manual, usa el mismo precio
+            df_pers['precioMayorista'] = df_pers['price']
         else:
-            df_pers['precioMayorista'] = df_pers['precioMayorista'].apply(limpiar_precio)
+            df_pers['precioMayorista'] = df_pers['precioMayorista'].apply(limpiar_precio_seguro)
 
-        # 3. Rellenar vacíos por si acaso
         df_pers['status'] = df_pers['status'].apply(lambda x: 'Normal' if str(x).strip() == '' else x)
         df_pers['description'] = df_pers['description'].apply(lambda x: 'Hermosa pieza exclusiva' if str(x).strip() == '' else x)
 
-        # 4. Enlaces de imágenes (respeta tu link manual o busca en Drive)
         def asignar_imagen(row):
             img_actual = str(row.get('images', '')).strip()
             if img_actual:
@@ -284,17 +281,37 @@ try:
             return ''
 
         df_pers['images'] = df_pers.apply(asignar_imagen, axis=1)
+        df_pers['stock'] = pd.to_numeric(df_pers['stock'], errors='coerce').fillna(0).astype(int)
 
-        # 5. Formatear stock
-        df_pers['stock'] = pd.to_numeric(df_pers['stock'], errors='coerce').fillna(0)
-
-        # 6. Unir al catálogo maestro (Con stock e inactivos)
-        df_final = pd.concat([df_final, df_pers], ignore_index=True)
-        df_final['id'] = range(1, len(df_final) + 1)
-
-        print(f"✅ ¡{len(df_pers)} productos personalizados procesados!")
+        df_final = pd.concat([df_final, df_pers[df_final.columns]], ignore_index=True)
+        print(f"✅ ¡{len(df_pers)} productos personalizados de Sheets procesados!")
 except Exception as e:
-    print(f"⚠️ Omitiendo personalizados (Pestaña vacía o error): {e}")
+    print(f"⚠️ Omitiendo personalizados de Sheets: {e}")
+
+# Inyectar también personalizados creados directamente desde el ERP con fotos de Cloudinary
+try:
+    erp_url = os.environ.get('ERP_PUBLIC_URL', 'https://www.diangeljoyeria.com')
+    req = urllib.request.Request(f"{erp_url}/api/erp/custom-products", headers={'User-Agent': 'DiangelBot/1.0'})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        erp_data = json.loads(resp.read().decode('utf-8'))
+        if erp_data.get('success') and erp_data.get('products'):
+            df_erp = pd.DataFrame(erp_data['products'])
+            for col in df_final.columns:
+                if col not in df_erp.columns:
+                    df_erp[col] = ''
+            # Evitar duplicar códigos que ya estén en df_final
+            codigos_existentes = set(df_final['code'].astype(str).str.upper())
+            df_erp = df_erp[~df_erp['code'].astype(str).str.upper().isin(codigos_existentes)]
+            if len(df_erp) > 0:
+                df_final = pd.concat([df_final, df_erp[df_final.columns]], ignore_index=True)
+                print(f"✅ ¡{len(df_erp)} productos personalizados desde el ERP inyectados!")
+except Exception as e:
+    print(f"ℹ️ Sin productos adicionales desde API ERP (o aún no desplegado): {e}")
+
+df_final['price'] = df_final['price'].apply(limpiar_precio_seguro)
+df_final['precioMayorista'] = df_final['precioMayorista'].apply(limpiar_precio_seguro)
+df_final['stock'] = pd.to_numeric(df_final['stock'], errors='coerce').fillna(0).astype(int)
+df_final['id'] = range(1, len(df_final) + 1)
 
 # ==========================================
 # FASE 3.8: CREAR HOJA MAESTRA PARA FACTURACIÓN
@@ -309,42 +326,40 @@ try:
     ws_completo.clear()
     datos_completo = [df_final.columns.values.tolist()] + df_final.fillna('').values.tolist()
     ws_completo.update(values=datos_completo, range_name='A1')
-    print("✅ 'Inventario_Completo' guardado con éxito. ¡Listo para facturar!")
+    print("✅ 'Inventario_Completo' guardado con éxito.")
 except Exception as e:
     print(f"❌ Error al subir Inventario Completo: {e}")
 
 # ==========================================
-# FASE 4: FILTRAR Y SUBIR SOLO ACTIVOS A HOJA 1
+# FASE 4: FILTRAR Y SUBIR SOLO ACTIVOS CON PRECIO > 0 A HOJA 1
 # ==========================================
-df_activos = df_final[df_final['stock'] > 0].copy()
+# 🔥 CORRECCIÓN: Exigimos tanto stock > 0 como price > 0
+df_activos = df_final[(df_final['stock'] > 0) & (df_final['price'] > 0)].copy()
 
 print("⬆️ Subiendo catálogo filtrado a Hoja 1 (Página web)...")
 try:
     worksheet_hoja1 = sh.worksheet('Hoja 1')
     worksheet_hoja1.clear()
-    # fillna('') es vital para que Google Sheets no arroje error con celdas vacías
     datos_hoja1 = [df_activos.columns.values.tolist()] + df_activos.fillna('').values.tolist()
     worksheet_hoja1.update(values=datos_hoja1, range_name='A1')
-    print("✅ 'Hoja 1' actualizada con éxito. ¡Lista para la página web!")
+    print("✅ 'Hoja 1' actualizada con éxito.")
 except Exception as e:
     print(f"❌ Error al subir a Hoja 1: {e}")
 
 # ==========================================
-# FASE 5: GENERAR CATÁLOGO PARA META Y WHATSAPP (MÚLTIPLES FOTOS)
+# FASE 5: GENERAR CATÁLOGO PARA META Y WHATSAPP
 # ==========================================
 print("🛒 Generando feed estructurado para Meta Business...")
 df_meta = pd.DataFrame()
 
-# AHORA USAMOS EXCLUSIVAMENTE 'df_activos' PARA QUE NO SALGAN AGOTADOS EN META
 df_meta['id'] = df_activos['id']
 df_meta['title'] = df_activos['name'].astype(str).str[:200]
 df_meta['description'] = df_activos['description'].astype(str).str[:9999]
 df_meta['availability'] = df_activos['stock'].apply(lambda x: 'in stock' if x > 0 else 'out of stock')
 df_meta['condition'] = 'new'
-df_meta['price'] = df_activos['price'].apply(lambda x: f"{float(x):.2f} COP")
+df_meta['price'] = df_activos['price'].apply(lambda x: f"{float(limpiar_precio_seguro(x)):.2f} COP")
 df_meta['link'] = df_activos['code'].apply(lambda x: f"https://www.diangeljoyeria.com/producto/{x}")
 
-# 🧠 TRADUCTOR DE FOTOS CLOUDINARY PARA META
 def extraer_foto_principal(url_string):
     if not url_string or str(url_string).strip() == '':
         return ""
@@ -361,7 +376,6 @@ def extraer_fotos_adicionales(url_string):
         return ""
     return ",".join(urls[1:])
 
-# Aplicamos las reglas de fotos
 df_meta['image_link'] = df_activos['images'].apply(extraer_foto_principal)
 df_meta['additional_image_link'] = df_activos['images'].apply(extraer_fotos_adicionales)
 
@@ -372,7 +386,6 @@ df_meta['item_group_id'] = df_activos['base_code']
 df_meta['color'] = df_activos['color']
 df_meta['material'] = df_activos['material']
 
-# Cerebro clasificador de WhatsApp
 def clasificar_whatsapp(row):
     cat = str(row['category']).strip().title()
     nombre = str(row['name']).upper()
@@ -386,8 +399,6 @@ def clasificar_whatsapp(row):
     return cat
 
 df_meta['custom_label_0'] = df_activos.apply(clasificar_whatsapp, axis=1)
-
-# Filtramos los que tengan imagen válida
 df_meta = df_meta[df_meta['image_link'] != '']
 print(f"📦 Total de productos con foto listos para Meta: {len(df_meta)}")
 
@@ -400,6 +411,27 @@ try:
     worksheet_meta.clear()
     datos_meta = [df_meta.columns.values.tolist()] + df_meta.fillna('').values.tolist()
     worksheet_meta.update(values=datos_meta, range_name='A1')
-    print("✅ Pestaña 'Meta_Feed' actualizada con éxito. ¡Fotos adicionales incluidas!")
+    print("✅ Pestaña 'Meta_Feed' actualizada con éxito.")
 except Exception as e:
     print(f"❌ Error al subir catálogo a Meta_Feed: {e}")
+
+# ==========================================
+# FASE 6: NOTIFICAR AUTOMÁTICAMENTE AL ERP (SUPABASE)
+# ==========================================
+print("🔄 Sincronizando automáticamente la base de datos del ERP (Supabase)...")
+try:
+    erp_url = os.environ.get('ERP_PUBLIC_URL', 'https://www.diangeljoyeria.com')
+    cron_secret = os.environ.get('ERP_CRON_SECRET', 'diangel_cron_sync_2026')
+    req = urllib.request.Request(
+        f"{erp_url}/api/erp/cron-sync",
+        method="POST",
+        headers={
+            'Authorization': f'Bearer {cron_secret}',
+            'User-Agent': 'DiangelBot/1.0'
+        }
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        res_json = json.loads(resp.read().decode('utf-8'))
+        print(f"🚀 ERP Supabase actualizado automáticamente: {res_json}")
+except Exception as e:
+    print(f"ℹ️ Aviso: No se pudo contactar el webhook del ERP (normal si aún no se ha desplegado en Vercel): {e}")
