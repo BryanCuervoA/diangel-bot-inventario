@@ -288,7 +288,7 @@ try:
 except Exception as e:
     print(f"⚠️ Omitiendo personalizados de Sheets: {e}")
 
-# Inyectar también personalizados creados directamente desde el ERP con fotos de Cloudinary
+# Inyectar productos nuevos O actualizar fotos de productos existentes desde el ERP
 try:
     erp_url = os.environ.get('ERP_PUBLIC_URL', 'https://www.diangeljoyeria.com')
     req = urllib.request.Request(f"{erp_url}/api/erp/custom-products", headers={'User-Agent': 'DiangelBot/1.0'})
@@ -299,12 +299,23 @@ try:
             for col in df_final.columns:
                 if col not in df_erp.columns:
                     df_erp[col] = ''
-            # Evitar duplicar códigos que ya estén en df_final
+
+            # 1. Si el código YA existía en Belatriz, actualizamos sus fotos de Cloudinary con las del ERP
+            for _, erp_row in df_erp.iterrows():
+                cod_erp = str(erp_row['code']).strip().upper()
+                imgs_erp = str(erp_row.get('images', '')).strip()
+                if imgs_erp:
+                    mask = df_final['code'].astype(str).str.upper() == cod_erp
+                    if mask.any():
+                        df_final.loc[mask, 'images'] = imgs_erp
+
+            # 2. Si el código NO existía en Belatriz, lo agregamos como producto nuevo
             codigos_existentes = set(df_final['code'].astype(str).str.upper())
-            df_erp = df_erp[~df_erp['code'].astype(str).str.upper().isin(codigos_existentes)]
-            if len(df_erp) > 0:
-                df_final = pd.concat([df_final, df_erp[df_final.columns]], ignore_index=True)
-                print(f"✅ ¡{len(df_erp)} productos personalizados desde el ERP inyectados!")
+            df_nuevos_erp = df_erp[~df_erp['code'].astype(str).str.upper().isin(codigos_existentes)]
+            if len(df_nuevos_erp) > 0:
+                df_final = pd.concat([df_final, df_nuevos_erp[df_final.columns]], ignore_index=True)
+
+            print(f"✅ ¡{len(df_erp)} productos creados/actualizados desde el ERP procesados!")
 except Exception as e:
     print(f"ℹ️ Sin productos adicionales desde API ERP (o aún no desplegado): {e}")
 
